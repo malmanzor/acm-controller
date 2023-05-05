@@ -360,6 +360,17 @@ func (in *CertificateStatus) DeepCopyInto(out *CertificateStatus) {
 			}
 		}
 	}
+	if in.CertificateDomainValidationOptions != nil {
+		in, out := &in.CertificateDomainValidationOptions, &out.CertificateDomainValidationOptions
+		*out = make([]*DomainValidation, len(*in))
+		for i := range *in {
+			if (*in)[i] != nil {
+				in, out := &(*in)[i], &(*out)[i]
+				*out = new(DomainValidation)
+				(*in).DeepCopyInto(*out)
+			}
+		}
+	}
 	if in.CreatedAt != nil {
 		in, out := &in.CreatedAt, &out.CreatedAt
 		*out = (*in).DeepCopy()

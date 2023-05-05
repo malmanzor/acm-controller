@@ -163,6 +163,40 @@ spec:
                 - ownerAccountID
                 - region
                 type: object
+              certificateDomainValidationOptions:
+                description: Contains information about the initial validation of
+                  each domain name that occurs as a result of the RequestCertificate
+                  request. This field exists only when the certificate type is AMAZON_ISSUED.
+                items:
+                  description: Contains information about the validation of each domain
+                    name in the certificate.
+                  properties:
+                    domainName:
+                      type: string
+                    resourceRecord:
+                      description: Contains a DNS record value that you can use to
+                        validate ownership or control of a domain. This is used by
+                        the DescribeCertificate action.
+                      properties:
+                        name:
+                          type: string
+                        type_:
+                          type: string
+                        value:
+                          type: string
+                      type: object
+                    validationDomain:
+                      type: string
+                    validationEmails:
+                      items:
+                        type: string
+                      type: array
+                    validationMethod:
+                      type: string
+                    validationStatus:
+                      type: string
+                  type: object
+                type: array
               conditions:
                 description: All CRS managed by ACK have a common `Status.Conditions`
                   member that contains a collection of `ackv1alpha1.Condition` objects

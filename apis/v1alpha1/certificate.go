@@ -106,6 +106,11 @@ type CertificateStatus struct {
 	// resource
 	// +kubebuilder:validation:Optional
 	Conditions []*ackv1alpha1.Condition `json:"conditions"`
+	// Contains information about the initial validation of each domain name that
+	// occurs as a result of the RequestCertificate request. This field exists only
+	// when the certificate type is AMAZON_ISSUED.
+	// +kubebuilder:validation:Optional
+	CertificateDomainValidationOptions []*DomainValidation `json:"certificateDomainValidationOptions,omitempty"`
 	// The time at which the certificate was requested.
 	// +kubebuilder:validation:Optional
 	CreatedAt *metav1.Time `json:"createdAt,omitempty"`
