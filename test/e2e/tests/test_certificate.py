@@ -93,7 +93,15 @@ class TestCertificate:
         # PENDING_VALIDATION to FAILED, so this just checks to make sure we're
         # in one of those states...
         assert cr['status']['status'] in ['PENDING_VALIDATION', 'FAILED']
-
+        
+        assert "certificateDomainValidationOptions" in cr['status']
+        assert cr['status']['certificateDomainValidationOptions'][0]['domainName'] == "example.com"
+        
+        # With Valid domain-name cr returns the resourceRecord with valid CNAME in certificateDomainValidationOptions Status
+    
+        # if cr['status']['status'] == 'PENDING_VALIDATION':
+        #     assert 'resourceRecord' in cr['status']['certificateDomainValidationOptions']  
+        
         # Wait for the resource to get synced
         assert k8s.wait_on_condition(
             ref,
