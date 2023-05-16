@@ -38,10 +38,9 @@ MAX_WAIT_FOR_SYNCED_MINUTES = 1
 
 
 @pytest.fixture
-def certificate_public():
-    certificate_name = random_suffix_name("certificate", 20)
-    domain_name = "example.com"
-
+def certificate_public(domain_name):
+    certificate_name = random_suffix_name("certificate", 20)    
+    
     replacements = REPLACEMENT_VALUES.copy()
     replacements['CERTIFICATE_NAME'] = certificate_name
     replacements['DOMAIN_NAME'] = domain_name
@@ -77,10 +76,12 @@ def certificate_public():
 @service_marker
 @pytest.mark.canary
 class TestCertificate:
+    @pytest.mark.parametrize("domain_name", ["example.com"])    
     def test_crud_public(
             self,
             certificate_public,
     ):
+                
         (ref, cr) = certificate_public
         assert "status" in cr
         assert "ackResourceMetadata" in cr["status"]
@@ -122,4 +123,41 @@ class TestCertificate:
 
         time.sleep(DELETE_WAIT_AFTER_SECONDS)
 
-        certificate.wait_until_deleted(certificate_arn)        
+        certificate.wait_until_deleted(certificate_arn)
+    
+    @pytest.mark.parametrize("domain_name", ["fakedomain.net"])
+    def test_cert_domain_validation_status(
+            self,
+            certificate_public,
+    ):
+        (ref, cr) = certificate_public
+        certificate_arn = cr["status"]["ackResourceMetadata"]["arn"] 
+        # Wait for the resource to get synced
+        assert k8s.wait_on_condition(
+            ref,
+            "ACK.ResourceSynced",
+            "True",
+            wait_periods=MAX_WAIT_FOR_SYNCED_MINUTES,
+        )
+               
+        certificate.wait_until(
+            certificate_arn,
+            certificate.status_matches("PENDING_VALIDATION"),
+        )
+        
+        time.sleep(MAX_WAIT_FOR_SYNCED_MINUTES)
+
+        cr = k8s.get_resource(ref)
+        assert "status" in cr
+        assert 'status' in cr['status']
+        assert cr['status']['status'] == 'PENDING_VALIDATION'
+        assert "certificateDomainValidationOptions" in cr['status']
+        assert cr['status']['certificateDomainValidationOptions'][0]['domainName'] == "fakedomain.net"
+        if cr['status']['status'] in ['PENDING_VALIDATION']:
+            assert 'resourceRecord' in cr['status']['certificateDomainValidationOptions'][0]
+                                       
+        k8s.delete_custom_resource(ref)
+
+        time.sleep(DELETE_WAIT_AFTER_SECONDS)
+
+        certificate.wait_until_deleted(certificate_arn)       
