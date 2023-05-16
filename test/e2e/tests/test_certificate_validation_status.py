@@ -26,21 +26,17 @@ from e2e import certificate
 
 RESOURCE_PLURAL = 'certificates'
 
-# NOTE(jaypipes): requeue_on_success_seconds = 60 for certificates, and in the
-# tests we check for Status.Status, which will only appear after a successful
-# Describe
 CREATE_WAIT_AFTER_SECONDS = 65
-FAILED_WAIT_AFTER_SECONDS = 60
+
 DELETE_WAIT_AFTER_SECONDS = 30
 
 # Time we wait for the certificate to get to ACK.ResourceSynced=True
 MAX_WAIT_FOR_SYNCED_MINUTES = 1
 
-
 @pytest.fixture
-def certificate_public():
+def certificate_public_fake():
     certificate_name = random_suffix_name("certificate", 20)
-    domain_name = "example.com"
+    domain_name = "fakedomain.net"
 
     replacements = REPLACEMENT_VALUES.copy()
     replacements['CERTIFICATE_NAME'] = certificate_name
@@ -72,27 +68,19 @@ def certificate_public():
         assert deleted
         certificate.wait_until_deleted(certificate_arn)
     except:
-        pass
+        pass    
+
 
 @service_marker
 @pytest.mark.canary
-class TestCertificate:
-    def test_crud_public(
+class TestCertificateValidationStatus:        
+    #Test certificateDomainValidationOptions Status  
+    def test_cert_domain_validation_status(
             self,
-            certificate_public,
+            certificate_public_fake,
     ):
-        (ref, cr) = certificate_public
-        assert "status" in cr
-        assert "ackResourceMetadata" in cr["status"]
-        assert "arn" in cr["status"]["ackResourceMetadata"]
-        certificate_arn = cr["status"]["ackResourceMetadata"]["arn"]
-
-        assert 'status' in cr['status']
-        # NOTE(jaypipes): The certificate request will quickly transition from
-        # PENDING_VALIDATION to FAILED, so this just checks to make sure we're
-        # in one of those states...
-        assert cr['status']['status'] in ['PENDING_VALIDATION', 'FAILED']
-                            
+        (ref, cr) = certificate_public_fake
+        certificate_arn = cr["status"]["ackResourceMetadata"]["arn"] 
         # Wait for the resource to get synced
         assert k8s.wait_on_condition(
             ref,
@@ -100,26 +88,25 @@ class TestCertificate:
             "True",
             wait_periods=MAX_WAIT_FOR_SYNCED_MINUTES,
         )
-       
-        # NOTE(jaypipes): The domain name is example.com, which will cause the
-        # certificate to transition to a FAILED status due to additional
-        # verification being needed.
+               
         certificate.wait_until(
             certificate_arn,
-            certificate.status_matches("FAILED"),
+            certificate.status_matches("PENDING_VALIDATION"),
         )
         
-        time.sleep(FAILED_WAIT_AFTER_SECONDS)
+        time.sleep(MAX_WAIT_FOR_SYNCED_MINUTES)
 
-        # The corresponding CR should be updated to a FAILED status as well
-        # because we have requeue_on_success_seconds = 60...
         cr = k8s.get_resource(ref)
         assert "status" in cr
         assert 'status' in cr['status']
-        assert cr['status']['status'] == 'FAILED'
-
+        assert cr['status']['status'] == 'PENDING_VALIDATION'
+        assert "certificateDomainValidationOptions" in cr['status']
+        assert cr['status']['certificateDomainValidationOptions'][0]['domainName'] == "fakedomain.net"
+        if cr['status']['status'] in ['PENDING_VALIDATION','SUCCESS']:
+            assert 'resourceRecord' in cr['status']['certificateDomainValidationOptions'][0]
+                                       
         k8s.delete_custom_resource(ref)
 
         time.sleep(DELETE_WAIT_AFTER_SECONDS)
 
-        certificate.wait_until_deleted(certificate_arn)        
+        certificate.wait_until_deleted(certificate_arn)    
