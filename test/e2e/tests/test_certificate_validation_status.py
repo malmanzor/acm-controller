@@ -102,7 +102,7 @@ class TestCertificateValidationStatus:
         assert cr['status']['status'] == 'PENDING_VALIDATION'
         assert "certificateDomainValidationOptions" in cr['status']
         assert cr['status']['certificateDomainValidationOptions'][0]['domainName'] == "fakedomain.net"
-        if cr['status']['status'] in ['PENDING_VALIDATION','SUCCESS']:
+        if cr['status']['status'] in ['PENDING_VALIDATION']:
             assert 'resourceRecord' in cr['status']['certificateDomainValidationOptions'][0]
                                        
         k8s.delete_custom_resource(ref)
