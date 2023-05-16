@@ -40,7 +40,7 @@ MAX_WAIT_FOR_SYNCED_MINUTES = 1
 @pytest.fixture
 def certificate_public():
     certificate_name = random_suffix_name("certificate", 20)
-    domain_name = "example.com"
+    domain_name = "fakedomain.net"
 
     replacements = REPLACEMENT_VALUES.copy()
     replacements['CERTIFICATE_NAME'] = certificate_name
@@ -93,15 +93,7 @@ class TestCertificate:
         # PENDING_VALIDATION to FAILED, so this just checks to make sure we're
         # in one of those states...
         assert cr['status']['status'] in ['PENDING_VALIDATION', 'FAILED']
-        
-        assert "certificateDomainValidationOptions" in cr['status']
-        assert cr['status']['certificateDomainValidationOptions'][0]['domainName'] == "example.com"
-        
-        # With Valid domain-name cr returns the resourceRecord with valid CNAME in certificateDomainValidationOptions Status
-    
-        # if cr['status']['status'] == 'PENDING_VALIDATION':
-        #     assert 'resourceRecord' in cr['status']['certificateDomainValidationOptions']  
-        
+                            
         # Wait for the resource to get synced
         assert k8s.wait_on_condition(
             ref,
@@ -109,23 +101,28 @@ class TestCertificate:
             "True",
             wait_periods=MAX_WAIT_FOR_SYNCED_MINUTES,
         )
-
-        # NOTE(jaypipes): The domain name is example.com, which will cause the
-        # certificate to transition to a FAILED status due to additional
+       
+        # NOTE(jaypipes): The domain name is fakedomain.net, which will cause the
+        # certificate to transition to a PENDING_VALIDATION status due to additional
         # verification being needed.
         certificate.wait_until(
             certificate_arn,
-            certificate.status_matches("FAILED"),
+            certificate.status_matches("PENDING_VALIDATION"),
         )
-
+        
         time.sleep(FAILED_WAIT_AFTER_SECONDS)
 
-        # The corresponding CR should be updated to a FAILED status as well
+        # The corresponding CR should be updated to a PENDING_VALIDATION status as well
         # because we have requeue_on_success_seconds = 60...
         cr = k8s.get_resource(ref)
         assert "status" in cr
         assert 'status' in cr['status']
-        assert cr['status']['status'] == 'FAILED'
+        assert cr['status']['status'] == 'PENDING_VALIDATION'
+
+        assert "certificateDomainValidationOptions" in cr['status']
+        assert cr['status']['certificateDomainValidationOptions'][0]['domainName'] == "fakedomain.net"
+        if cr['status']['status'] in ['PENDING_VALIDATION','SUCCESS']:
+            assert 'resourceRecord' in cr['status']['certificateDomainValidationOptions'][0]
 
         k8s.delete_custom_resource(ref)
 
