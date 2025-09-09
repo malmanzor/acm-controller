@@ -17,6 +17,8 @@ operations:
 resources:
   Certificate:
     hooks:
+      sdk_update_pre_build_request:
+        template_path: hooks/certificate/sdk_update_pre_build_request.go.tpl
       sdk_create_pre_build_request:
         template_path: hooks/certificate/sdk_create_pre_build_request.go.tpl
       sdk_create_post_build_request:
@@ -30,24 +32,63 @@ resources:
         # Unfortunately, because fields in the "ignore" configuration list are
         # now deleted from the aws-sdk-go private/model/api.Shape object,
         # setting `override_values` above does not work :(
-        code: input.SetValidationMethod("DNS")
+        code: input.ValidationMethod = "DNS"
+      sdk_read_one_pre_set_output:
+        template_path: hooks/certificate/sdk_read_one_pre_set_output.go.tpl
+      sdk_file_end:
+        template_path: hooks/certificate/sdk_file_end.go.tpl
+      late_initialize_post_read_one:
+        template_path: hooks/certificate/late_initialize_post_read_one.go.tpl
     exceptions:
+      errors:
+        404:
+          code: ResourceNotFoundException
       terminal_codes:
-        - InvalidParameter
-        - InvalidDomainValidationOptionsException 
+        - InvalidParameterException
+        - InvalidDomainValidationOptionsException
         - InvalidTagException
         - TagPolicyException
-        - TooManyTagsException 
+        - TooManyTagsException
+        - InvalidArnException
     reconcile:
       requeue_on_success_seconds: 60
     fields:
-      DomainValidationOptions:
-        late_initialize: {}
-      Options:
-        late_initialize: {}
-      SubjectAlternativeNames:
-        late_initialize: {}
+      DomainName:
+        is_primary_key: false
+        is_required: false
+      Certificate:
+        type: "bytes"
+        is_secret: true
+        is_immutable: true
+        compare:
+          is_ignored: true
+      PrivateKey:
+        type: "bytes"
+        is_secret: true
+        is_immutable: true
+        compare:
+          is_ignored: true
+      CertificateArn:
+        type: string
+        is_immutable: true
+      CertificateChain:
+        type: "bytes"
+        is_immutable: true
+        is_secret: true
+        compare:
+          is_ignored: true
+      CertificateAuthorityARN:
+        references:
+          service_name: acmpca
+          resource: CertificateAuthority
+          path: Status.ACKResourceMetadata.ARN
+        is_immutable: true
       KeyAlgorithm:
+        late_initialize: {}
+        is_immutable: true
+        compare:
+          is_ignored: true
+      Options:
         late_initialize: {}
       # NOTE(jaypipes): The Create operation (RequestCertificate) has a
       # response with only a single field (certificateArn). All of the status
@@ -59,6 +100,15 @@ resources:
         from:
           operation: DescribeCertificate
           path: Certificate.CreatedAt
+      DomainValidations:
+        is_read_only: true
+        from:
+          operation: DescribeCertificate
+          path: Certificate.DomainValidationOptions
+      DomainValidationOptions:
+        is_immutable: true
+        compare:
+          is_ignored: true
       ExtendedKeyUsages:
         is_read_only: true
         from:

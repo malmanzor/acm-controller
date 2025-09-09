@@ -43,6 +43,13 @@ func newResourceDelta(
 		return delta
 	}
 
+	if ackcompare.HasNilDifference(a.ko.Spec.CertificateARN, b.ko.Spec.CertificateARN) {
+		delta.Add("Spec.CertificateARN", a.ko.Spec.CertificateARN, b.ko.Spec.CertificateARN)
+	} else if a.ko.Spec.CertificateARN != nil && b.ko.Spec.CertificateARN != nil {
+		if *a.ko.Spec.CertificateARN != *b.ko.Spec.CertificateARN {
+			delta.Add("Spec.CertificateARN", a.ko.Spec.CertificateARN, b.ko.Spec.CertificateARN)
+		}
+	}
 	if ackcompare.HasNilDifference(a.ko.Spec.CertificateAuthorityARN, b.ko.Spec.CertificateAuthorityARN) {
 		delta.Add("Spec.CertificateAuthorityARN", a.ko.Spec.CertificateAuthorityARN, b.ko.Spec.CertificateAuthorityARN)
 	} else if a.ko.Spec.CertificateAuthorityARN != nil && b.ko.Spec.CertificateAuthorityARN != nil {
@@ -50,21 +57,14 @@ func newResourceDelta(
 			delta.Add("Spec.CertificateAuthorityARN", a.ko.Spec.CertificateAuthorityARN, b.ko.Spec.CertificateAuthorityARN)
 		}
 	}
+	if !reflect.DeepEqual(a.ko.Spec.CertificateAuthorityRef, b.ko.Spec.CertificateAuthorityRef) {
+		delta.Add("Spec.CertificateAuthorityRef", a.ko.Spec.CertificateAuthorityRef, b.ko.Spec.CertificateAuthorityRef)
+	}
 	if ackcompare.HasNilDifference(a.ko.Spec.DomainName, b.ko.Spec.DomainName) {
 		delta.Add("Spec.DomainName", a.ko.Spec.DomainName, b.ko.Spec.DomainName)
 	} else if a.ko.Spec.DomainName != nil && b.ko.Spec.DomainName != nil {
 		if *a.ko.Spec.DomainName != *b.ko.Spec.DomainName {
 			delta.Add("Spec.DomainName", a.ko.Spec.DomainName, b.ko.Spec.DomainName)
-		}
-	}
-	if !reflect.DeepEqual(a.ko.Spec.DomainValidationOptions, b.ko.Spec.DomainValidationOptions) {
-		delta.Add("Spec.DomainValidationOptions", a.ko.Spec.DomainValidationOptions, b.ko.Spec.DomainValidationOptions)
-	}
-	if ackcompare.HasNilDifference(a.ko.Spec.KeyAlgorithm, b.ko.Spec.KeyAlgorithm) {
-		delta.Add("Spec.KeyAlgorithm", a.ko.Spec.KeyAlgorithm, b.ko.Spec.KeyAlgorithm)
-	} else if a.ko.Spec.KeyAlgorithm != nil && b.ko.Spec.KeyAlgorithm != nil {
-		if *a.ko.Spec.KeyAlgorithm != *b.ko.Spec.KeyAlgorithm {
-			delta.Add("Spec.KeyAlgorithm", a.ko.Spec.KeyAlgorithm, b.ko.Spec.KeyAlgorithm)
 		}
 	}
 	if ackcompare.HasNilDifference(a.ko.Spec.Options, b.ko.Spec.Options) {
@@ -78,10 +78,16 @@ func newResourceDelta(
 			}
 		}
 	}
-	if !ackcompare.SliceStringPEqual(a.ko.Spec.SubjectAlternativeNames, b.ko.Spec.SubjectAlternativeNames) {
+	if len(a.ko.Spec.SubjectAlternativeNames) != len(b.ko.Spec.SubjectAlternativeNames) {
 		delta.Add("Spec.SubjectAlternativeNames", a.ko.Spec.SubjectAlternativeNames, b.ko.Spec.SubjectAlternativeNames)
+	} else if len(a.ko.Spec.SubjectAlternativeNames) > 0 {
+		if !ackcompare.SliceStringPEqual(a.ko.Spec.SubjectAlternativeNames, b.ko.Spec.SubjectAlternativeNames) {
+			delta.Add("Spec.SubjectAlternativeNames", a.ko.Spec.SubjectAlternativeNames, b.ko.Spec.SubjectAlternativeNames)
+		}
 	}
-	if !ackcompare.MapStringStringEqual(ToACKTags(a.ko.Spec.Tags), ToACKTags(b.ko.Spec.Tags)) {
+	desiredACKTags, _ := convertToOrderedACKTags(a.ko.Spec.Tags)
+	latestACKTags, _ := convertToOrderedACKTags(b.ko.Spec.Tags)
+	if !ackcompare.MapStringStringEqual(desiredACKTags, latestACKTags) {
 		delta.Add("Spec.Tags", a.ko.Spec.Tags, b.ko.Spec.Tags)
 	}
 

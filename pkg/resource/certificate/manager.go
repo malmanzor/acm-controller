@@ -32,9 +32,8 @@ import (
 	acktags "github.com/aws-controllers-k8s/runtime/pkg/tags"
 	acktypes "github.com/aws-controllers-k8s/runtime/pkg/types"
 	ackutil "github.com/aws-controllers-k8s/runtime/pkg/util"
-	"github.com/aws/aws-sdk-go/aws/session"
-	svcsdk "github.com/aws/aws-sdk-go/service/acm"
-	svcsdkapi "github.com/aws/aws-sdk-go/service/acm/acmiface"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	svcsdk "github.com/aws/aws-sdk-go-v2/service/acm"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 
@@ -51,7 +50,7 @@ var (
 // +kubebuilder:rbac:groups=acm.services.k8s.aws,resources=certificates,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=acm.services.k8s.aws,resources=certificates/status,verbs=get;update;patch
 
-var lateInitializeFieldNames = []string{"DomainValidationOptions", "KeyAlgorithm", "Options", "SubjectAlternativeNames"}
+var lateInitializeFieldNames = []string{"KeyAlgorithm", "Options"}
 
 // resourceManager is responsible for providing a consistent way to perform
 // CRUD operations in a backend AWS service API for Book custom resources.
@@ -59,6 +58,9 @@ type resourceManager struct {
 	// cfg is a copy of the ackcfg.Config object passed on start of the service
 	// controller
 	cfg ackcfg.Config
+	// clientcfg is a copy of the client configuration passed on start of the
+	// service controller
+	clientcfg aws.Config
 	// log refers to the logr.Logger object handling logging for the service
 	// controller
 	log logr.Logger
@@ -73,12 +75,9 @@ type resourceManager struct {
 	awsAccountID ackv1alpha1.AWSAccountID
 	// The AWS Region that this resource manager targets
 	awsRegion ackv1alpha1.AWSRegion
-	// sess is the AWS SDK Session object used to communicate with the backend
-	// AWS service API
-	sess *session.Session
-	// sdk is a pointer to the AWS service API interface exposed by the
-	// aws-sdk-go/services/{alias}/{alias}iface package.
-	sdkapi svcsdkapi.ACMAPI
+	// sdk is a pointer to the AWS service API client exposed by the
+	// aws-sdk-go-v2/services/{alias} package.
+	sdkapi *svcsdk.Client
 }
 
 // concreteResource returns a pointer to a resource from the supplied
@@ -103,6 +102,7 @@ func (rm *resourceManager) ReadOne(
 		panic("resource manager's ReadOne() method received resource with nil CR object")
 	}
 	observed, err := rm.sdkFind(ctx, r)
+	mirrorAWSTags(r, observed)
 	if err != nil {
 		if observed != nil {
 			return rm.onError(observed, err)
@@ -226,6 +226,17 @@ func (rm *resourceManager) LateInitialize(
 		ackcondition.SetSynced(latestCopy, corev1.ConditionFalse, nil, nil)
 		return latestCopy, err
 	}
+	{
+		observedKo := rm.concreteResource(observed).ko
+		latestKo := rm.concreteResource(latestCopy).ko
+		if observedKo.Spec.DomainValidationOptions != nil && latestKo.Spec.DomainValidationOptions == nil {
+			latestKo.Spec.DomainValidationOptions = observedKo.Spec.DomainValidationOptions
+		}
+		if observedKo.Spec.SubjectAlternativeNames != nil && latestKo.Spec.SubjectAlternativeNames == nil {
+			latestKo.Spec.SubjectAlternativeNames = observedKo.Spec.SubjectAlternativeNames
+		}
+	}
+
 	lateInitializedRes := rm.lateInitializeFromReadOneOutput(observed, latestCopy)
 	incompleteInitialization := rm.incompleteLateInitialization(lateInitializedRes)
 	if incompleteInitialization {
@@ -249,16 +260,10 @@ func (rm *resourceManager) incompleteLateInitialization(
 	res acktypes.AWSResource,
 ) bool {
 	ko := rm.concreteResource(res).ko.DeepCopy()
-	if ko.Spec.DomainValidationOptions == nil {
-		return true
-	}
 	if ko.Spec.KeyAlgorithm == nil {
 		return true
 	}
 	if ko.Spec.Options == nil {
-		return true
-	}
-	if ko.Spec.SubjectAlternativeNames == nil {
 		return true
 	}
 	return false
@@ -272,17 +277,11 @@ func (rm *resourceManager) lateInitializeFromReadOneOutput(
 ) acktypes.AWSResource {
 	observedKo := rm.concreteResource(observed).ko.DeepCopy()
 	latestKo := rm.concreteResource(latest).ko.DeepCopy()
-	if observedKo.Spec.DomainValidationOptions != nil && latestKo.Spec.DomainValidationOptions == nil {
-		latestKo.Spec.DomainValidationOptions = observedKo.Spec.DomainValidationOptions
-	}
 	if observedKo.Spec.KeyAlgorithm != nil && latestKo.Spec.KeyAlgorithm == nil {
 		latestKo.Spec.KeyAlgorithm = observedKo.Spec.KeyAlgorithm
 	}
 	if observedKo.Spec.Options != nil && latestKo.Spec.Options == nil {
 		latestKo.Spec.Options = observedKo.Spec.Options
-	}
-	if observedKo.Spec.SubjectAlternativeNames != nil && latestKo.Spec.SubjectAlternativeNames == nil {
-		latestKo.Spec.SubjectAlternativeNames = observedKo.Spec.SubjectAlternativeNames
 	}
 	return &resource{latestKo}
 }
@@ -318,32 +317,76 @@ func (rm *resourceManager) EnsureTags(
 	defaultTags := ackrt.GetDefaultTags(&rm.cfg, r.ko, md)
 	var existingTags []*svcapitypes.Tag
 	existingTags = r.ko.Spec.Tags
-	resourceTags := ToACKTags(existingTags)
+	resourceTags, keyOrder := convertToOrderedACKTags(existingTags)
 	tags := acktags.Merge(resourceTags, defaultTags)
-	r.ko.Spec.Tags = FromACKTags(tags)
+	r.ko.Spec.Tags = fromACKTags(tags, keyOrder)
 	return nil
+}
+
+// FilterAWSTags ignores tags that have keys that start with "aws:"
+// is needed to ensure the controller does not attempt to remove
+// tags set by AWS. This function needs to be called after each Read
+// operation.
+// Eg. resources created with cloudformation have tags that cannot be
+// removed by an ACK controller
+func (rm *resourceManager) FilterSystemTags(res acktypes.AWSResource) {
+	r := rm.concreteResource(res)
+	if r == nil || r.ko == nil {
+		return
+	}
+	var existingTags []*svcapitypes.Tag
+	existingTags = r.ko.Spec.Tags
+	resourceTags, tagKeyOrder := convertToOrderedACKTags(existingTags)
+	ignoreSystemTags(resourceTags)
+	r.ko.Spec.Tags = fromACKTags(resourceTags, tagKeyOrder)
+}
+
+// mirrorAWSTags ensures that AWS tags are included in the desired resource
+// if they are present in the latest resource. This will ensure that the
+// aws tags are not present in a diff. The logic of the controller will
+// ensure these tags aren't patched to the resource in the cluster, and
+// will only be present to make sure we don't try to remove these tags.
+//
+// Although there are a lot of similarities between this function and
+// EnsureTags, they are very much different.
+// While EnsureTags tries to make sure the resource contains the controller
+// tags, mirrowAWSTags tries to make sure tags injected by AWS are mirrored
+// from the latest resoruce to the desired resource.
+func mirrorAWSTags(a *resource, b *resource) {
+	if a == nil || a.ko == nil || b == nil || b.ko == nil {
+		return
+	}
+	var existingLatestTags []*svcapitypes.Tag
+	var existingDesiredTags []*svcapitypes.Tag
+	existingDesiredTags = a.ko.Spec.Tags
+	existingLatestTags = b.ko.Spec.Tags
+	desiredTags, desiredTagKeyOrder := convertToOrderedACKTags(existingDesiredTags)
+	latestTags, _ := convertToOrderedACKTags(existingLatestTags)
+	syncAWSTags(desiredTags, latestTags)
+	a.ko.Spec.Tags = fromACKTags(desiredTags, desiredTagKeyOrder)
 }
 
 // newResourceManager returns a new struct implementing
 // acktypes.AWSResourceManager
+// This is for AWS-SDK-GO-V2 - Created newResourceManager With AWS sdk-Go-ClientV2
 func newResourceManager(
 	cfg ackcfg.Config,
+	clientcfg aws.Config,
 	log logr.Logger,
 	metrics *ackmetrics.Metrics,
 	rr acktypes.Reconciler,
-	sess *session.Session,
 	id ackv1alpha1.AWSAccountID,
 	region ackv1alpha1.AWSRegion,
 ) (*resourceManager, error) {
 	return &resourceManager{
 		cfg:          cfg,
+		clientcfg:    clientcfg,
 		log:          log,
 		metrics:      metrics,
 		rr:           rr,
 		awsAccountID: id,
 		awsRegion:    region,
-		sess:         sess,
-		sdkapi:       svcsdk.New(sess),
+		sdkapi:       svcsdk.NewFromConfig(clientcfg),
 	}, nil
 }
 

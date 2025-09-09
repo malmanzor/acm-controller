@@ -23,6 +23,14 @@ import (
 // CertificateSpec defines the desired state of Certificate.
 type CertificateSpec struct {
 
+	// The Certificate to import into AWS Certificate Manager (ACM) to use with services that are integrated with ACM.
+	// This field is only valid when importing an existing certificate into ACM.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable once set"
+	Certificate *ackv1alpha1.SecretKeyReference `json:"certificate,omitempty"`
+	// The Amazon Resource Name (ARN) of an imported certificate to replace. This field is only valid when importing
+	// an existing certificate into ACM.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable once set"
+	CertificateARN *string `json:"certificateARN,omitempty"`
 	// The Amazon Resource Name (ARN) of the private certificate authority (CA)
 	// that will be used to issue the certificate. If you do not provide an ARN
 	// and you are trying to request a private certificate, ACM will attempt to
@@ -31,7 +39,13 @@ type CertificateSpec struct {
 	// user guide. The ARN must have the following form:
 	//
 	// arn:aws:acm-pca:region:account:certificate-authority/12345678-1234-1234-1234-123456789012
-	CertificateAuthorityARN *string `json:"certificateAuthorityARN,omitempty"`
+	//
+	// Regex Pattern: `^arn:[\w+=/,.@-]+:acm-pca:[\w+=/,.@-]*:[0-9]+:[\w+=,.@-]+(/[\w+=,.@-]+)*$`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable once set"
+	CertificateAuthorityARN *string                                  `json:"certificateAuthorityARN,omitempty"`
+	CertificateAuthorityRef *ackv1alpha1.AWSResourceReferenceWrapper `json:"certificateAuthorityRef,omitempty"`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable once set"
+	CertificateChain *ackv1alpha1.SecretKeyReference `json:"certificateChain,omitempty"`
 	// Fully qualified domain name (FQDN), such as www.example.com, that you want
 	// to secure with an ACM certificate. Use an asterisk (*) to create a wildcard
 	// certificate that protects several sites in the same domain. For example,
@@ -42,22 +56,40 @@ type CertificateSpec struct {
 	// cannot exceed 64 octets (characters), including periods. To add a longer
 	// domain name, specify it in the Subject Alternative Name field, which supports
 	// names up to 253 octets in length.
-	// +kubebuilder:validation:Required
-	DomainName *string `json:"domainName"`
+	//
+	// Regex Pattern: `^(\*\.)?(((?!-)[A-Za-z0-9-]{0,62}[A-Za-z0-9])\.)+((?!-)[A-Za-z0-9-]{1,62}[A-Za-z0-9])$`
+	DomainName *string `json:"domainName,omitempty"`
 	// The domain name that you want ACM to use to send you emails so that you can
 	// validate domain ownership.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable once set"
 	DomainValidationOptions []*DomainValidationOption `json:"domainValidationOptions,omitempty"`
 	// Specifies the algorithm of the public and private key pair that your certificate
 	// uses to encrypt data. RSA is the default key algorithm for ACM certificates.
 	// Elliptic Curve Digital Signature Algorithm (ECDSA) keys are smaller, offering
 	// security comparable to RSA keys but with greater computing efficiency. However,
-	// ECDSA is not supported by all network clients. Some AWS services may require
-	// RSA keys, or only support ECDSA keys of a particular size, while others allow
-	// the use of either RSA and ECDSA keys to ensure that compatibility is not
-	// broken. Check the requirements for the AWS service where you plan to deploy
-	// your certificate.
+	// ECDSA is not supported by all network clients. Some Amazon Web Services services
+	// may require RSA keys, or only support ECDSA keys of a particular size, while
+	// others allow the use of either RSA and ECDSA keys to ensure that compatibility
+	// is not broken. Check the requirements for the Amazon Web Services service
+	// where you plan to deploy your certificate. For more information about selecting
+	// an algorithm, see Key algorithms (https://docs.aws.amazon.com/acm/latest/userguide/acm-certificate.html#algorithms).
+	//
+	// Algorithms supported for an ACM certificate request include:
+	//
+	//   - RSA_2048
+	//
+	//   - EC_prime256v1
+	//
+	//   - EC_secp384r1
+	//
+	// Other listed algorithms are for imported certificates only.
+	//
+	// When you request a private PKI certificate signed by a CA from Amazon Web
+	// Services Private CA, the specified signing algorithm family (RSA or ECDSA)
+	// must match the algorithm family of the CA's secret key.
 	//
 	// Default: RSA_2048
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable once set"
 	KeyAlgorithm *string `json:"keyAlgorithm,omitempty"`
 	// Currently, you can use this parameter to specify whether to add the certificate
 	// to a certificate transparency log. Certificate transparency makes it possible
@@ -66,6 +98,10 @@ type CertificateSpec struct {
 	// in a browser. For more information, see Opting Out of Certificate Transparency
 	// Logging (https://docs.aws.amazon.com/acm/latest/userguide/acm-bestpractices.html#best-practices-transparency).
 	Options *CertificateOptions `json:"options,omitempty"`
+	// The private key that matches the public key in the certificate. This field is only valid when importing
+	// an existing certificate into ACM.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable once set"
+	PrivateKey *ackv1alpha1.SecretKeyReference `json:"privateKey,omitempty"`
 	// Additional FQDNs to be included in the Subject Alternative Name extension
 	// of the ACM certificate. For example, add the name www.example.net to a certificate
 	// for which the DomainName field is www.example.com if users can reach your
@@ -100,7 +136,7 @@ type CertificateStatus struct {
 	// constructed ARN for the resource
 	// +kubebuilder:validation:Optional
 	ACKResourceMetadata *ackv1alpha1.ResourceMetadata `json:"ackResourceMetadata"`
-	// All CRS managed by ACK have a common `Status.Conditions` member that
+	// All CRs managed by ACK have a common `Status.Conditions` member that
 	// contains a collection of `ackv1alpha1.Condition` objects that describe
 	// the various terminal states of the CR and its backend AWS service API
 	// resource
@@ -109,6 +145,11 @@ type CertificateStatus struct {
 	// The time at which the certificate was requested.
 	// +kubebuilder:validation:Optional
 	CreatedAt *metav1.Time `json:"createdAt,omitempty"`
+	// Contains information about the initial validation of each domain name that
+	// occurs as a result of the RequestCertificate request. This field exists only
+	// when the certificate type is AMAZON_ISSUED.
+	// +kubebuilder:validation:Optional
+	DomainValidations []*DomainValidation `json:"domainValidations,omitempty"`
 	// Contains a list of Extended Key Usage X.509 v3 extension objects. Each object
 	// specifies a purpose for which the certificate public key can be used and
 	// consists of a name and an object identifier (OID).
